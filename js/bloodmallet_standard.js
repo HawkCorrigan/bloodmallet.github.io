@@ -36,6 +36,7 @@ const modes = {
 };
 
 let loaded_data = {};
+let translation_stuff = {};
 
 let chosen_class = "";
 let chosen_spec = "";
@@ -250,43 +251,7 @@ const empty_chart = {
       }
     }
   },
-  series: [
-    {
-      color: light_color,
-      data: [
-        1,
-        1,
-        3,
-        1,
-        3
-      ],
-      name: "b main",
-      showInLegend: false
-    },
-    {
-      color: dark_color,
-      data: [
-        0,
-        0,
-        0,
-        1,
-        0
-      ],
-      name: "b's emptiness",
-      showInLegend: false
-    }, {
-      color: light_color,
-      data: [
-        0,
-        0,
-        0,
-        1,
-        0
-      ],
-      name: "b's finishing touch",
-      showInLegend: false
-    }
-  ],
+  series: [],
   subtitle: {
     text: "Data not found",
     useHTML: true,
@@ -350,13 +315,7 @@ const empty_chart = {
     }
   },
   xAxis: {
-    categories: [
-      "b",
-      "b",
-      "b",
-      "b",
-      "b",
-    ],
+    categories: [],
     labels: {
       useHTML: true,
       style: {
@@ -695,23 +654,28 @@ document.addEventListener("DOMContentLoaded", function () {
  * Switches the language and calls translate_page and translate_chart to do the actual translation.
  */
 async function switch_language(new_language) {
-  debug && console.log("switch_language");
-
-  if (language === new_language) {
-    debug && console.log(`switch_language early exit. new_language: ${new_language}, current language: ${language}`);
-    return;
-  } else {
-    debug && console.log("new language: " + new_language);
+  if(debug) {
+    console.log("switch_language");
+    if (language === new_language) {
+      console.log(`switch_language early exit. new_language: ${new_language}, current language: ${language}`);
+      return;
+    } else {
+      console.log("new language: " + new_language);
+    }
   }
 
   // if new language is different to already active language and if it wasn't already loaded
-  if (!loaded_languages[new_language]) {
-    let response = await fetch(`./translations/${new_language.toLowerCase()}.json`);
-    loaded_languages[new_language] = await response.json();
-  }
+  await fetch_language_data(new_language);
   language = new_language;
   set_language_cookie();
   push_state();
+}
+
+async function fetch_language_data(language){
+  if(!loaded_languages[language]) {
+    let response = await fetch(`./translations/${language.toLowerCase()}.json`)
+    loaded_languages[language] = await response.json();
+  }
 }
 
 
@@ -721,6 +685,10 @@ async function switch_language(new_language) {
 function translate_page() {
   if (debug)
     console.log("translate_page");
+
+  if(!loaded_languages){
+
+  }
 
   // get the translation options
   var language_html_elements = document.getElementById("languageSelector").options;
@@ -736,7 +704,7 @@ function translate_page() {
     }
   }
 
-  if (typeof loaded_languages[language] === 'undefined') {
+  if (!loaded_languages[language]) {
     debug && console.log("translate_page abort, due to missing data");
     return;
   }
@@ -933,46 +901,37 @@ function update_link_data(original_list) {
   if (debug)
     console.log("update_link_data");
 
-  let all_translated = true;
+  let new_categories=[];
   for (let a in original_list) {
 
     let original_link = original_list[a];
-    let new_link;
-    try {
-      new_link = document.getElementById("translator_helper").childNodes[a].outerHTML;
-    } catch (error) {
-      debug && console.log(`update_link_data couldn't find '${original_link}' in the translator_helper. Abort.`);
-      clear_translator();
-      return;
-    }
-    // wowhead tooltips add span elements into the link, therefore changing the number of the resulting array
-    if (original_link.split(">").length == new_link.split(">").length && original_link.indexOf("baseline") == -1) {
-      all_translated = false;
-    }
+    let link = original_link.match(/<a(.*?)>/)[0];
+    let trinket = original_link.match(/item=(.*?)&/)[1];
+    let translated_name = get_name(trinket, language);
+    let new_link=`${link}${translated_name}</a>`;
+    new_categories.push(new_link);
   }
-
-  if (!all_translated) {
-    setTimeout(function () { update_link_data(original_list) }, 1000);
-    return;
-  }
-
-  let new_categories = [];
-  for (let link of document.getElementById("translator_helper").childNodes) {
-    new_categories.push(link.outerHTML);
-  }
-
   clear_translator();
-
-  if (debug) {
-    console.log(original_list);
-    console.log(new_categories);
-    console.log("updating categories with new_categories from update_link_data");
-  }
   standard_chart.update({
     xAxis: {
       categories: new_categories
     }
   }, true);
+}
+
+function get_name(id, lang){
+
+  const result = translation_stuff.find(function(item){
+     return item['id']==id;
+    }
+  );
+  console.log("RESULT");
+  console.log(result);
+  if(!result['names']) {
+    console.log(`DIDNT FIND ITEM ${id}`);
+    return id.toString();
+  }
+  return result['names'][`${lang.toLowerCase()}_${lang.toUpperCase()}`]
 }
 
 /** Save the current language in a cookie. */
@@ -1178,6 +1137,9 @@ async function load_data() {
     file_name += "_" + fight_style + ".json";
     let response = await fetch(`./json/${data_view}/${file_name}`);
     loaded_data[chosen_class][chosen_spec][data_name][fight_style] = await response.json();
+
+    response = await fetch(`./json/data.json`);
+    translation_stuff=await response.json();
   }
   update_talent_selector();
   update_chart();
@@ -1397,7 +1359,7 @@ function update_chart() {
   if (debug)
     console.log("update_chart");
 
-  if (data_view == "secondary_distributions") {
+  if (data_view === "secondary_distributions") {
     document.getElementById("scatter_plot_warning").hidden = false;
     document.getElementById("scatter_plot_chart").hidden = false;
     document.getElementById("chart").hidden = true;
@@ -2096,11 +2058,12 @@ function create_color(dps, min_dps, max_dps) {
 function update_scatter_chart() {
   if (debug)
     console.log("update_scatter_chart");
-
+  const chosen_talent_data = loaded_data[chosen_class][chosen_spec][data_view][fight_style]["data"][chosen_talent_combination];
+  const sorted_data_keys = loaded_data[chosen_class][chosen_spec][data_view][fight_style]["sorted_data_keys"][chosen_talent_combination];
   // get max dps of the whole data set
-  let max_dps = loaded_data[chosen_class][chosen_spec][data_view][fight_style]["data"][chosen_talent_combination][loaded_data[chosen_class][chosen_spec][data_view][fight_style]["sorted_data_keys"][chosen_talent_combination][0]];
+  let max_dps = chosen_talent_data[sorted_data_keys[0]];
   // get min dps of the whole data set
-  let min_dps = loaded_data[chosen_class][chosen_spec][data_view][fight_style]["data"][chosen_talent_combination][loaded_data[chosen_class][chosen_spec][data_view][fight_style]["sorted_data_keys"][chosen_talent_combination][loaded_data[chosen_class][chosen_spec][data_view][fight_style]["sorted_data_keys"][chosen_talent_combination].length - 1]];
+  let min_dps = chosen_talent_data[sorted_data_keys[sorted_data_keys.length - 1]];
 
   // prepare series with standard data
   let series = {
@@ -2110,8 +2073,8 @@ function update_scatter_chart() {
   };
 
   // add a marker for each distribution in the data set
-  for (let distribution of Object.keys(loaded_data[chosen_class][chosen_spec][data_view][fight_style]["data"][chosen_talent_combination])) {
-    let talent_data_distribution = loaded_data[chosen_class][chosen_spec][data_view][fight_style]["data"][chosen_talent_combination][distribution];
+  for (let distribution of Object.keys(chosen_talent_data)) {
+    let talent_data_distribution = chosen_talent_data[distribution];
     // get the markers color
     let color_set = create_color(
       talent_data_distribution,
